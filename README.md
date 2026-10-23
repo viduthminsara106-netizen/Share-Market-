@@ -27,7 +27,7 @@ The project is already pre-configured for Vercel with `vercel.json` (Vite SPA re
    - **Root Directory**: `./` (leave default).
    - **Build Command**: `npm run build`
    - **Output Directory**: `dist`
-   - **Install Command**: `npm install`
+   - **Install Command**: `npm install --legacy-peer-deps` (pre-configured in vercel.json & .npmrc)
 
 4. **Deploy**:
    - Click **"Deploy"**. Vercel will install packages, build the Vite app, and provide your live production URL (e.g., `https://your-project.vercel.app`).
