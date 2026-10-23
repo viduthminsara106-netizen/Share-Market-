@@ -238,9 +238,15 @@ function ShareMarketCardImage({ levelNumber }: { levelNumber: number }) {
 }
 
 export default function App() {
-  // Authentication state - inputs start empty
+  // Authentication state - default to 'register' until at least one account is registered on this browser
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authMode, setAuthMode] = useState<'login' | 'register'>(() => {
+    try {
+      return localStorage.getItem('lkr_sm_has_registered_v1') === 'true' ? 'login' : 'register';
+    } catch {
+      return 'register';
+    }
+  });
   const [authPhone, setAuthPhone] = useState<string>('');
   const [authPassword, setAuthPassword] = useState<string>('');
   const [authConfirmPassword, setAuthConfirmPassword] = useState<string>('');
@@ -249,14 +255,42 @@ export default function App() {
   const [isRefLocked, setIsRefLocked] = useState<boolean>(false);
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string>('');
+  const [authSuccess, setAuthSuccess] = useState<string>('');
 
   // Navigation & Core State
   const [activeTab, setActiveTab] = useState<MainTab>('home');
   const [config, setConfig] = useState<PlatformConfig>(INITIAL_CONFIG);
   const [user, setUser] = useState<UserProfile>(INITIAL_USER);
-  const [allUsers, setAllUsers] = useState<UserProfile[]>(INITIAL_ALL_USERS);
+  const [allUsers, setAllUsers] = useState<UserProfile[]>(() => {
+    try {
+      const saved = localStorage.getItem('lkr_sm_users_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved) as UserProfile[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const hasAdmin = parsed.some((u) => u.phone === ADMIN_USER.phone);
+          return hasAdmin ? parsed : [ADMIN_USER, ...parsed];
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return INITIAL_ALL_USERS;
+  });
   const [team, setTeam] = useState<TeamMember[]>(INITIAL_TEAM);
-  const [transactions, setTransactions] = useState<Transaction[]>(INITIAL_TRANSACTIONS);
+  const [transactions, setTransactions] = useState<Transaction[]>(() => {
+    try {
+      const saved = localStorage.getItem('lkr_sm_txs_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved) as Transaction[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return INITIAL_TRANSACTIONS;
+  });
   const [supportMessages, setSupportMessages] = useState<SupportMessage[]>(INITIAL_SUPPORT_MESSAGES);
 
   // Admin Configurable Company Banks & Social Channels
@@ -554,22 +588,46 @@ export default function App() {
     };
   }, [transactions]);
 
+  // Persist allUsers and transactions to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('lkr_sm_users_v1', JSON.stringify(allUsers));
+    } catch {
+      // ignore storage errors
+    }
+  }, [allUsers]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('lkr_sm_txs_v1', JSON.stringify(transactions));
+    } catch {
+      // ignore storage errors
+    }
+  }, [transactions]);
+
   // Auth Submit
   const handleAuthSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
+    setAuthSuccess('');
+
     if (!authPhone.trim() || !authPassword.trim()) {
-      setAuthError('Please enter your phone number and password.');
+      setAuthError('කරුණාකර දුරකථන අංකය සහ මුරපදය ඇතුළත් කරන්න. (Please enter your phone number and password.)');
       return;
     }
 
     const cleanPhone = authPhone.replace(/[\s\-+]/g, '');
     const cleanPassword = authPassword.trim();
 
+    if (cleanPhone.length < 9 || !/^\d+$/.test(cleanPhone)) {
+      setAuthError('කරුණාකර නිවැරදි දුරකථන අංකයක් ඇතුළත් කරන්න. (Please enter a valid phone number.)');
+      return;
+    }
+
     // EXCLUSIVE ADMIN LOGIN (Phone: 0711452778, Password: 12345678)
-    if (cleanPhone === '0711452778') {
+    if (cleanPhone === '0711452778' && authMode === 'login') {
       if (cleanPassword !== '12345678') {
-        setAuthError('Invalid admin password. Please try again.');
+        setAuthError('පරිපාලක මුරපදය වැරදියි. (Invalid admin password. Please try again.)');
         return;
       }
       setUser(ADMIN_USER);
@@ -591,29 +649,59 @@ export default function App() {
         setAuthError('This phone number is reserved for administration. Please switch to Login.');
         return;
       }
-      if (authPassword !== authConfirmPassword) {
-        setAuthError('Passwords do not match.');
+      if (!authName.trim()) {
+        setAuthError('කරුණාකර ඔබගේ නම ඇතුළත් කරන්න. (Please enter your name to register.)');
         return;
       }
-      const displayName = authName.trim() || `User ${cleanPhone.slice(-4)}`;
+      if (cleanPassword.length < 4) {
+        setAuthError('මුරපදය අවම වශයෙන් අකුරු හෝ ඉලක්කම් 4ක් විය යුතුය. (Password must be at least 4 characters.)');
+        return;
+      }
+      if (authPassword !== authConfirmPassword) {
+        setAuthError('මුරපද දෙක සමාන නොවේ! (Passwords do not match.)');
+        return;
+      }
+
+      // Check if this phone number is already registered
+      const existingRegisteredUser = allUsers.find(
+        (u) => u.isRegistered && u.phone.replace(/[\s\-+]/g, '') === cleanPhone
+      );
+      if (existingRegisteredUser) {
+        setAuthError(
+          'මෙම දුරකථන අංකය දැනටමත් ලියාපදිංචි කර ඇත! කරුණාකර Login වන්න. (This phone number is already registered. Please login.)'
+        );
+        return;
+      }
+
+      const displayName = authName.trim();
+      const generatedRefCode = `LKR-${Math.floor(1000 + Math.random() * 9000)}`;
       const newUser: UserProfile = {
-        ...INITIAL_USER,
         id: `usr-${Date.now()}`,
         name: displayName,
         phone: authPhone.trim(),
+        email: `${cleanPhone}@lkrsharemarket.lk`,
+        password: cleanPassword,
+        isRegistered: true,
         role: 'member',
+        referralCode: generatedRefCode,
+        referredBy: authReferral.trim() || undefined,
         balanceLkr: config.dailySignupBonusLkr,
         totalDepositedLkr: 0,
         totalWithdrawnLkr: 0,
         totalReferralEarnedLkr: 0,
         lastDailyBonusDate: todayStr,
+        bankName: '',
+        accountNumber: '',
+        accountHolder: displayName,
         activePackages: [],
         status: 'active',
         joinedAt: todayStr,
       };
-      setUser(newUser);
-      setAllUsers((prev) => [newUser, ...prev]);
-      setProfileForm((prev) => ({ ...prev, name: displayName, phone: authPhone.trim() }));
+
+      setAllUsers((prev) => [
+        newUser,
+        ...prev.filter((u) => u.phone.replace(/[\s\-+]/g, '') !== cleanPhone),
+      ]);
       setTransactions((prev) => [
         {
           id: `tx-${Date.now()}`,
@@ -627,46 +715,64 @@ export default function App() {
         },
         ...prev,
       ]);
-      showNotice(`Registration successful! +${formatLkr(config.dailySignupBonusLkr)} bonus added.`);
-    } else {
-      // Check if user is suspended in allUsers list
-      const matchedUser = allUsers.find(
-        (u) => u.phone.replace(/[\s\-+]/g, '') === cleanPhone
+
+      try {
+        localStorage.setItem('lkr_sm_has_registered_v1', 'true');
+      } catch {
+        // ignore
+      }
+
+      // Switch to Login tab so user logs in with their newly registered account
+      setAuthMode('login');
+      setAuthPassword('');
+      setAuthConfirmPassword('');
+      setAuthSuccess(
+        `ලියාපදිංචිය සාර්ථකයි! (+${formatLkr(config.dailySignupBonusLkr)} ප්‍රසාද දීමනාව එක් කරන ලදී). දැන් ඔබගේ මුරපදය ඇතුළත් කර Login වන්න.`
       );
-      if (matchedUser && matchedUser.status === 'suspended') {
-        setAuthError('Your account has been deactivated/logged out by Administrator.');
-        return;
-      }
-      if (matchedUser) {
-        setUser(matchedUser);
-        setProfileForm({
-          name: matchedUser.name,
-          phone: matchedUser.phone,
-          bankName: matchedUser.bankName,
-          accountNumber: matchedUser.accountNumber,
-          accountHolder: matchedUser.accountHolder,
-        });
-      } else {
-        const standardUser: UserProfile = {
-          ...INITIAL_USER,
-          id: `usr-${Date.now()}`,
-          name: `Member ${cleanPhone.slice(-4)}`,
-          phone: authPhone.trim(),
-          role: 'member',
-        };
-        setUser(standardUser);
-        setProfileForm({
-          name: standardUser.name,
-          phone: standardUser.phone,
-          bankName: standardUser.bankName,
-          accountNumber: standardUser.accountNumber,
-          accountHolder: standardUser.accountHolder,
-        });
-      }
-      showNotice('Logged in successfully.');
+      return;
     }
+
+    // STRICT LOGIN MODE: User MUST be registered first!
+    const matchedUser = allUsers.find(
+      (u) => u.isRegistered && u.phone.replace(/[\s\-+]/g, '') === cleanPhone
+    );
+
+    if (!matchedUser) {
+      setAuthError(
+        'මෙම දුරකථන අංකය ලියාපදිංචි කර නැත! ගිණුමට පිවිසීමට පෙර අනිවාර්යයෙන්ම Register විය යුතුය. (Account not found! You must register first before logging in.)'
+      );
+      return;
+    }
+
+    if (matchedUser.status === 'suspended') {
+      setAuthError('ඔබගේ ගිණුම පරිපාලක විසින් අත්හිටුවා ඇත. (Your account has been deactivated by Administrator.)');
+      return;
+    }
+
+    if (matchedUser.password !== cleanPassword) {
+      setAuthError(
+        'මුරපදය වැරදියි! කරුණාකර නිවැරදි මුරපදය ඇතුළත් කරන්න. (Incorrect password! Please enter the correct password.)'
+      );
+      return;
+    }
+
+    setUser(matchedUser);
+    setProfileForm({
+      name: matchedUser.name,
+      phone: matchedUser.phone,
+      bankName: matchedUser.bankName,
+      accountNumber: matchedUser.accountNumber,
+      accountHolder: matchedUser.accountHolder,
+    });
+    setWithdrawBankForm({
+      bankName: matchedUser.bankName,
+      accountNumber: matchedUser.accountNumber,
+      accountHolder: matchedUser.accountHolder || matchedUser.name,
+      branch: 'Colombo Main Branch (001)',
+    });
     setIsAuthenticated(true);
     setActiveTab('home');
+    showNotice(`ආයුබෝවන් ${matchedUser.name}! ගිණුමට සාර්ථකව පිවිසුණා.`);
   };
 
   // Guard: Ensure non-admin users cannot access admin tab
@@ -1569,6 +1675,7 @@ export default function App() {
                 onClick={() => {
                   setAuthMode('login');
                   setAuthError('');
+                  setAuthSuccess('');
                 }}
                 className={`py-2.5 text-xs font-semibold rounded-lg transition-colors min-h-[44px] cursor-pointer ${
                   authMode === 'login'
@@ -1576,13 +1683,14 @@ export default function App() {
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Login
+                Login · පිවිසෙන්න
               </button>
               <button
                 type="button"
                 onClick={() => {
                   setAuthMode('register');
                   setAuthError('');
+                  setAuthSuccess('');
                 }}
                 className={`py-2.5 text-xs font-semibold rounded-lg transition-colors min-h-[44px] cursor-pointer ${
                   authMode === 'register'
@@ -1590,13 +1698,36 @@ export default function App() {
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Register
+                Register · ලියාපදිංචි වන්න
               </button>
             </div>
 
+            {authSuccess && (
+              <div className="mb-4 p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 font-medium flex items-start gap-2.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <span>{authSuccess}</span>
+              </div>
+            )}
+
             {authError && (
-              <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700">
-                {authError}
+              <div className="mb-4 p-3.5 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 space-y-2">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                  <span>{authError}</span>
+                </div>
+                {authMode === 'login' && authError.includes('Register') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('register');
+                      setAuthError('');
+                      setAuthSuccess('');
+                    }}
+                    className="w-full py-2 px-3 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer"
+                  >
+                    දැන්ම Register වන්න (Create Account First) →
+                  </button>
+                )}
               </div>
             )}
 

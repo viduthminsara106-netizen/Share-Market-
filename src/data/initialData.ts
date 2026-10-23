@@ -174,6 +174,8 @@ export const ADMIN_USER: UserProfile = {
   name: 'Administrator',
   phone: '0711452778',
   email: 'admin@lkrsharemarket.lk',
+  password: '12345678',
+  isRegistered: true,
   role: 'admin',
   referralCode: 'ADMIN-001',
   balanceLkr: 50000,

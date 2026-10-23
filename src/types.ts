@@ -92,6 +92,8 @@ export interface UserProfile {
   name: string;
   phone: string;
   email: string;
+  password?: string;
+  isRegistered?: boolean;
   role: 'member' | 'admin';
   referralCode: string;
   referredBy?: string;
