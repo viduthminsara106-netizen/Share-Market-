@@ -108,10 +108,11 @@ const SRI_LANKAN_BANKS = [
 // Brand Logo component
 function BrandLogo({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
   const iconSize = size === 'lg' ? 'w-14 h-14' : size === 'sm' ? 'w-8 h-8' : 'w-11 h-11';
+  const pxSize = size === 'lg' ? 56 : size === 'sm' ? 32 : 44;
   return (
     <div className="flex items-center gap-3">
       <div className={`${iconSize} relative flex items-center justify-center shrink-0`}>
-        <svg viewBox="0 0 100 100" fill="none" className="w-full h-full drop-shadow-md">
+        <svg width={pxSize} height={pxSize} viewBox="0 0 100 100" fill="none" className="w-full h-full drop-shadow-md">
           <defs>
             <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
               <stop offset="0%" stopColor="#10b981" />
